@@ -108,7 +108,8 @@ export default async function handler(req, res) {
         recipients.push({ address: process.env.FEE_WALLET_ADDRESS, amount: feeAmount });
       }
       if (holdersCount > 0 && holdersAmount > 0) {
-        weights = qualifiedHolders.map(holder => Math.log10(holder.balance + 1));
+        // Adjusted logarithmic weighting
+        weights = qualifiedHolders.map(holder => Math.log10(Math.max(holder.balance, 1000)) * 2);
         const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
         if (totalWeight <= 0) {
           await logToFile("No valid weights for holders, sending all to fee wallet");
@@ -133,7 +134,7 @@ export default async function handler(req, res) {
         holdersAmount = 0;
       }
       const distributionContent = [
-        `\nAirdrop Distribution (on mainnet, ${feeWalletPercentage}% fee wallet, ${holdersPercentage}% holders with logarithmic weighting)`,
+        `\nAirdrop Distribution (on mainnet, ${feeWalletPercentage}% fee wallet, ${holdersPercentage}% holders with adjusted logarithmic weighting)`,
         "-".repeat(50),
         `Fee Wallet (${process.env.FEE_WALLET_ADDRESS}): ${(recipients.find(r => r.address === process.env.FEE_WALLET_ADDRESS)?.amount || 0) / LAMPORTS_PER_SOL} SOL`,
         ...qualifiedHolders.map(
