@@ -18,7 +18,7 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  const connection = new Connection("https://api.devnet.solana.com", "confirmed");
+  const connection = new Connection(process.env.SOLANA_RPC_URL, "confirmed");
   let keypair;
   try {
     keypair = await initializeKeypair();
@@ -41,7 +41,7 @@ export default async function handler(req, res) {
     // Clear airdrop log at the start of each cycle
     const logFilePath = path.join(process.cwd(), "airdrop_log.txt");
     await fs.writeFile(logFilePath, "");
-    await logToFile(`Starting airdrop cycle (holder scraping on mainnet, airdrop on devnet). Project directory: ${process.cwd()}`);
+    await logToFile(`Starting airdrop cycle on mainnet. Project directory: ${process.cwd()}`);
 
     // Validate percentage environment variables
     const holdersPercentage = parseFloat(process.env.HOLDERS_PERCENTAGE) || 90;
@@ -56,9 +56,16 @@ export default async function handler(req, res) {
     const minimumWalletBalanceSol = parseFloat(process.env.MINIMUM_WALLET_BALANCE_SOL) || 0.2;
     await logToFile(`Using MINIMUM_TOKEN_BALANCE: ${minimumTokenBalance}, MINIMUM_WALLET_BALANCE_SOL: ${minimumWalletBalanceSol}`);
 
-    // Bypass claimFeesForToken for devnet testing
-    await logToFile(`Bypassing fee claiming for token ${process.env.TOKEN_MINT_ADDRESS} on devnet`);
-    const claimedSol = 0; // await claimFeesForToken(process.env.TOKEN_MINT_ADDRESS, connection, keypair, logToFile);
+    // Claim fees for token
+    await logToFile(`Claiming fees for token ${process.env.TOKEN_MINT_ADDRESS} on mainnet`);
+    let claimedSol;
+    try {
+      claimedSol = await claimFeesForToken(process.env.TOKEN_MINT_ADDRESS, connection, keypair, logToFile);
+      await logToFile(`Claimed ${claimedSol} SOL in fees`);
+    } catch (error) {
+      await logToFile(`Failed to claim fees: ${error.message}`);
+      claimedSol = 0; // Continue with airdrop even if fee claiming fails
+    }
 
     await logToFile("Fetching token holders from mainnet...");
     const holders = await fetchTokenHolders(process.env.TOKEN_MINT_ADDRESS, logToFile);
@@ -71,7 +78,7 @@ export default async function handler(req, res) {
     const outputContent = [
       `Token Holders for Mint: ${process.env.TOKEN_MINT_ADDRESS} (fetched from mainnet)`,
       `Total Holders: ${holders.length}`,
-      `Qualified Holders (on devnet, min ${minimumTokenBalance} tokens): ${qualifiedHolders.length}`,
+      `Qualified Holders (on mainnet, min ${minimumTokenBalance} tokens): ${qualifiedHolders.length}`,
       "-".repeat(50),
       ...holders.map(
         (holder) => `Holder: ${holder.holder_address}, Balance: ${holder.balance}, Token Account: ${holder.token_account}, Qualified: ${qualifiedHolders.some(q => q.holder_address === holder.holder_address) ? "Yes" : "No"}`
@@ -81,7 +88,7 @@ export default async function handler(req, res) {
     await fs.writeFile(holdersFilePath, outputContent);
     await logToFile(`Saved ${holders.length} token holders (${qualifiedHolders.length} qualified) to ${holdersFilePath}`);
     const balance = await connection.getBalance(keypair.publicKey, "confirmed");
-    await logToFile(`Devnet wallet balance: ${balance / LAMPORTS_PER_SOL} SOL`);
+    await logToFile(`Mainnet wallet balance: ${balance / LAMPORTS_PER_SOL} SOL`);
     let airdroppedLamports = 0;
     const MINIMUM_BALANCE = minimumWalletBalanceSol * LAMPORTS_PER_SOL;
     if (balance > MINIMUM_BALANCE) {
@@ -89,8 +96,8 @@ export default async function handler(req, res) {
       await logToFile(`Distributable amount: ${distributableLamports / LAMPORTS_PER_SOL} SOL`);
       const feeWalletValid = await validateMainnetAddress(connection, process.env.FEE_WALLET_ADDRESS, logToFile);
       if (!feeWalletValid) {
-        await logToFile(`Fee wallet ${process.env.FEE_WALLET_ADDRESS} does not exist on devnet`);
-        return res.status(400).json({ error: `Fee wallet ${process.env.FEE_WALLET_ADDRESS} does not exist on devnet` });
+        await logToFile(`Fee wallet ${process.env.FEE_WALLET_ADDRESS} does not exist on mainnet`);
+        return res.status(400).json({ error: `Fee wallet ${process.env.FEE_WALLET_ADDRESS} does not exist on mainnet` });
       }
       const feeAmount = Math.floor(distributableLamports * (feeWalletPercentage / 100));
       let holdersAmount = distributableLamports - feeAmount;
@@ -126,7 +133,7 @@ export default async function handler(req, res) {
         holdersAmount = 0;
       }
       const distributionContent = [
-        `\nAirdrop Distribution (on devnet, ${feeWalletPercentage}% fee wallet, ${holdersPercentage}% holders with logarithmic weighting)`,
+        `\nAirdrop Distribution (on mainnet, ${feeWalletPercentage}% fee wallet, ${holdersPercentage}% holders with logarithmic weighting)`,
         "-".repeat(50),
         `Fee Wallet (${process.env.FEE_WALLET_ADDRESS}): ${(recipients.find(r => r.address === process.env.FEE_WALLET_ADDRESS)?.amount || 0) / LAMPORTS_PER_SOL} SOL`,
         ...qualifiedHolders.map(
@@ -138,15 +145,15 @@ export default async function handler(req, res) {
       if (recipients.length > 0) {
         airdroppedLamports = await sendAirdrop(connection, keypair, recipients, logToFile);
         if (airdroppedLamports > 0) {
-          await logToFile("Airdrop completed successfully on devnet");
+          await logToFile("Airdrop completed successfully on mainnet");
         } else {
-          await logToFile("Airdrop failed on devnet, see logs for details");
+          await logToFile("Airdrop failed on mainnet, see logs for details");
         }
       } else {
-        await logToFile("No valid recipients, skipping airdrop on devnet");
+        await logToFile("No valid recipients, skipping airdrop on mainnet");
       }
     } else {
-      await logToFile(`Devnet wallet balance <= ${minimumWalletBalanceSol} SOL, skipping airdrop`);
+      await logToFile(`Mainnet wallet balance <= ${minimumWalletBalanceSol} SOL, skipping airdrop`);
     }
     const airdroppedSol = airdroppedLamports / LAMPORTS_PER_SOL;
     await appendToExcel(new Date(), claimedSol, airdroppedSol);

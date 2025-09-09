@@ -1,11 +1,12 @@
 # Solana Airdrop System for Pump.fun
 
-This project is a Next.js-based web application for managing and visualizing a Solana token airdrop cycle. It scrapes token holders from the Solana mainnet, validates them on devnet, and distributes SOL to qualified holders (with a configurable minimum token balance) and a fee wallet using logarithmic weighting. The dashboard displays airdrop history, total fees claimed, and total SOL distributed, with real-time updates via Pusher, dark mode support, and data persistence to AWS S3.
+This project is a Next.js-based web application for managing and visualizing a Solana token airdrop cycle on mainnet. It scrapes token holders from the Solana mainnet, claims creator fees via the Pump Portal API, and distributes SOL to qualified holders (with a configurable minimum token balance) and a fee wallet using logarithmic weighting. The dashboard displays airdrop history, total fees claimed, and total SOL distributed, with real-time updates via Pusher, dark mode support, and data persistence to AWS S3.
 
 ## Features
 
 - **Token Holder Scraping**: Fetches token holders for a specified token mint from Solana mainnet using Helius RPC.
-- **Airdrop Distribution**: Distributes SOL on devnet to qualified holders (≥ configurable token balance) and a fee wallet (90/10% split by default).
+- **Fee Claiming**: Claims creator fees for the token via the Pump Portal API (`https://pumpportal.fun/api/trade-local`).
+- **Airdrop Distribution**: Distributes SOL on mainnet to qualified holders (≥ configurable token balance) and a fee wallet (90/10% split by default).
 - **Logarithmic Weighting**: Allocates SOL to holders based on the logarithm of their token balance.
 - **Real-Time Updates**: Uses Pusher to update the dashboard in real-time when airdrops occur.
 - **S3 Persistence**: Saves airdrop history to `dashboard_data.xlsx` in an AWS S3 bucket.
@@ -15,16 +16,16 @@ This project is a Next.js-based web application for managing and visualizing a S
   - `MINIMUM_WALLET_BALANCE_SOL`: Minimum SOL in the airdrop wallet to proceed (default: 0.2).
   - `HOLDERS_PERCENTAGE` and `FEE_WALLET_PERCENTAGE`: Distribution split (default: 90/10).
 - **Logging**: Outputs cycle details to `airdrop_log.txt` and holder data to `token_holders.txt` (cleared each cycle).
-- **Bypassed Fee Claiming**: Fee claiming is disabled on devnet for testing (re-enable for mainnet).
 
 ## Prerequisites
 
 - **Node.js**: Version 16 or higher.
 - **Git**: For cloning the repository.
-- **Solana CLI**: For funding devnet wallets (optional for testing).
+- **Solana CLI**: For generating keypairs and checking balances on mainnet.
 - **AWS Account**: For S3 storage of `dashboard_data.xlsx`.
 - **Pusher Account**: For real-time dashboard updates.
-- **Vercel Account**: For deployment (optional).
+- **Vercel Account**: For deployment.
+- **Mainnet Wallet**: Funded with sufficient SOL for airdrops and transaction fees.
 
 ## Setup
 
@@ -44,11 +45,11 @@ Create a `.env.local` file in the project root (`C:\Users\Administrator\Desktop\
 
 ```env
 # Solana configuration
-SOLANA_RPC_URL=https://api.devnet.solana.com
+SOLANA_RPC_URL=https://api.mainnet-beta.solana.com
 HELIUS_RPC_URL=your_helius_mainnet_rpc_url
-PRIVATE_KEY=your_devnet_private_key
+PRIVATE_KEY=your_mainnet_private_key
 TOKEN_MINT_ADDRESS=your_mainnet_token_mint_address
-FEE_WALLET_ADDRESS=your_devnet_fee_wallet_address
+FEE_WALLET_ADDRESS=your_mainnet_fee_wallet_address
 
 # Airdrop parameters
 HOLDERS_PERCENTAGE=90
@@ -73,14 +74,20 @@ NEXT_PUBLIC_PUSHER_CLUSTER=your_pusher_cluster
 
 **Notes**:
 - **Solana**:
-  - Get `HELIUS_RPC_URL` from [https://www.helius.dev](https://www.helius.dev).
-  - Generate `PRIVATE_KEY` for the airdrop wallet using `solana-keygen new`.
-  - Use a valid mainnet `TOKEN_MINT_ADDRESS` (e.g., `6bunJ76HV9SCDHkukezST3VKzQKJ8JtjTQQ92UD7pump`).
-  - Fund `FEE_WALLET_ADDRESS` and the airdrop wallet on devnet:
+  - **SOLANA_RPC_URL**: Use `https://api.mainnet-beta.solana.com` or a premium provider (e.g., QuickNode) for reliability.
+  - **HELIUS_RPC_URL**: Obtain from [https://www.helius.dev](https://www.helius.dev) for mainnet token holder scraping.
+  - **PRIVATE_KEY**: Generate a mainnet keypair:
     ```bash
-    solana airdrop 2 <airdrop_wallet_address> --url https://api.devnet.solana.com
-    solana airdrop 2 <fee_wallet_address> --url https://api.devnet.solana.com
+    solana-keygen new -o mainnet-keypair.json
     ```
+    Copy the base58-encoded private key to `PRIVATE_KEY`.
+  - **TOKEN_MINT_ADDRESS**: Mainnet token mint (e.g., `6bunJ76HV9SCDHkukezST3VKzQKJ8JtjTQQ92UD7pump`). Ensure the airdrop wallet is the creator or fee recipient.
+  - **FEE_WALLET_ADDRESS**: Mainnet wallet for fees (e.g., `AT1EFv9PqocDryKUcva39vjgH77GEC3JD8WW6gHdcw43`).
+  - **Funding**: Fund both wallets with SOL:
+    ```bash
+    solana balance <airdrop_wallet_address> --url https://api.mainnet-beta.solana.com
+    ```
+    Transfer SOL from an exchange (e.g., Binance) to exceed `MINIMUM_WALLET_BALANCE_SOL` (0.2 SOL) plus fees (~0.000005 SOL per transaction).
 - **AWS**:
   - Create an S3 bucket and IAM user with `s3:PutObject`, `s3:GetObject`, and `s3:ListBucket` permissions.
 - **Pusher**:
@@ -111,17 +118,18 @@ npm run dev
   - `airdrop_log.txt`: Logs cycle details (cleared each cycle).
   - `token_holders.txt`: Lists token holders and distribution (cleared each cycle).
   - `dashboard_data.xlsx`: Persisted in S3, containing airdrop history.
-  - Transactions: View on `https://explorer.solana.com/tx/<signature>?cluster=devnet`.
+  - Transactions: View on `https://solscan.io/tx/<signature>` (mainnet).
 
 ### Airdrop Cycle
 - **Endpoint**: `POST /api/airdrop`
 - **Process**:
   1. Clears `airdrop_log.txt` and `token_holders.txt`.
-  2. Fetches token holders for `TOKEN_MINT_ADDRESS` from mainnet.
-  3. Validates holders on devnet (must exist and have ≥ `MINIMUM_TOKEN_BALANCE` tokens).
-  4. Checks airdrop wallet balance (must be > `MINIMUM_WALLET_BALANCE_SOL`).
-  5. Distributes SOL: `FEE_WALLET_PERCENTAGE` to `FEE_WALLET_ADDRESS`, `HOLDERS_PERCENTAGE` to qualified holders (logarithmic weighting).
-  6. Saves data to S3 and emits Pusher updates.
+  2. Claims creator fees for `TOKEN_MINT_ADDRESS` via Pump Portal API.
+  3. Fetches token holders for `TOKEN_MINT_ADDRESS` from mainnet.
+  4. Validates holders on mainnet (must exist and have ≥ `MINIMUM_TOKEN_BALANCE` tokens).
+  5. Checks airdrop wallet balance (must be > `MINIMUM_WALLET_BALANCE_SOL`).
+  6. Distributes SOL: `FEE_WALLET_PERCENTAGE` to `FEE_WALLET_ADDRESS`, `HOLDERS_PERCENTAGE` to qualified holders (logarithmic weighting).
+  7. Saves data to S3 and emits Pusher updates.
 - **Trigger Locally**:
   ```bash
   curl -X POST http://localhost:3000/api/airdrop
@@ -131,11 +139,32 @@ npm run dev
   curl -X POST https://your-project.vercel.app/api/airdrop
   ```
 
-### Vercel Deployment
+## Mainnet Deployment Notes
+- **Fee Claiming**:
+  - Uses Pump Portal API (`https://pumpportal.fun/api/trade-local`) to claim creator fees.
+  - Ensure the airdrop wallet (`PRIVATE_KEY`) is the creator or fee recipient for `TOKEN_MINT_ADDRESS`.
+  - Logs show transaction signatures: `https://solscan.io/tx/<signature>`.
+- **Wallet Funding**:
+  - Fund the airdrop wallet with >0.2 SOL (plus fees):
+    ```bash
+    solana balance <airdrop_wallet_address> --url https://api.mainnet-beta.solana.com
+    ```
+  - Fund the fee wallet if needed:
+    ```bash
+    solana balance <fee_wallet_address> --url https://api.mainnet-beta.solana.com
+    ```
+- **RPC**:
+  - Use a reliable mainnet RPC (e.g., QuickNode or Helius) to avoid rate limits.
+  - Test `HELIUS_RPC_URL` for token holder scraping:
+    ```bash
+    curl -X POST -H "Content-Type: application/json" -d '{"jsonrpc":"2.0","id":1,"method":"getTokenAccounts","params":{"mint":"your_token_mint"}}' your_helius_rpc_url
+    ```
+
+## Vercel Deployment
 1. **Push to GitHub**:
    ```bash
    git add .
-   git commit -m "Update project"
+   git commit -m "Update for mainnet"
    git push origin main
    ```
 2. **Configure Vercel**:
@@ -158,45 +187,46 @@ npm run dev
 
 ## Troubleshooting
 
+- **Fee Claiming Fails**:
+  - Check `airdrop_log.txt` for:
+    ```
+    Failed to generate fee claiming transaction: <error>
+    ```
+  - Verify `TOKEN_MINT_ADDRESS` and airdrop wallet authority with Pump Portal.
+  - Test the API manually:
+    ```bash
+    curl -X POST -H "Content-Type: application/json" -d '{"publicKey":"your_wallet_public_key","action":"collectCreatorFee","mint":"your_token_mint","priorityFee":0.000001}' https://pumpportal.fun/api/trade-local
+    ```
+- **Few Qualified Holders**:
+  - Check `token_holders.txt` for holder counts.
+  - Lower `MINIMUM_TOKEN_BALANCE` (e.g., 50000) in `.env.local` for testing.
+  - Verify `HELIUS_RPC_URL` functionality.
+- **Insufficient SOL**:
+  - Check wallet balance:
+    ```bash
+    solana balance <airdrop_wallet_address> --url https://api.mainnet-beta.solana.com
+    ```
+  - Fund via an exchange.
 - **Push Fails**:
-  - **Large Files**: Ensure no files >100 MB are committed:
+  - Ensure no large files (>100 MB):
     ```bash
     git ls-files | xargs ls -lh | awk '$5 ~ /[0-9]+M/ {print $9, $5}'
     ```
-    Remove with `git filter-repo --path <file> --invert-paths --force`.
-  - **Secrets**: Never commit `.env.local`. If committed, remove from history:
+  - Ensure no secrets in `.env.local`:
+    ```bash
+    git ls-files | grep .env.local
+    ```
+    Remove with:
     ```bash
     git filter-repo --path .env.local --invert-paths --force
-    git push origin main --force
     ```
-- **Dark Mode Fails**:
-  - Check console (F12 > Console) for logs like `Toggling dark mode to: true`.
-  - Ensure `tailwind.config.js` has `darkMode: "class"`.
-  - Inspect `<html>` (F12 > Elements) for the `dark` class.
-- **Real-Time Updates Fail**:
-  - Verify Pusher credentials in `.env.local` and Vercel.
-  - Check Pusher dashboard for connection logs.
-- **S3 Issues**:
-  - Ensure IAM permissions include `s3:PutObject`, `s3:GetObject`, `s3:ListBucket`.
-  - Check `airdrop_log.txt` for S3 errors.
-- **Few Qualified Holders**:
-  - Only 10/293 holders qualified in tests due to devnet non-existence. For testing, bypass validation in `lib/solana.js`:
-    ```javascript
-    async function validateMainnetAddress(connection, address, logToFile) {
-      await logToFile(`Skipping devnet validation for address ${address}`);
-      return true;
-    }
-    ```
-
-## Mainnet Deployment
-- Re-enable `claimFeesForToken` in `pages/api/airdrop.js`:
-  ```javascript
-  const claimedSol = await claimFeesForToken(process.env.TOKEN_MINT_ADDRESS, connection, keypair, logToFile);
-  ```
-- Update `.env.local`:
-  - Set `SOLANA_RPC_URL` to a mainnet RPC (e.g., `https://api.mainnet-beta.solana.com`).
-  - Ensure `PRIVATE_KEY`, `TOKEN_MINT_ADDRESS`, and `FEE_WALLET_ADDRESS` are mainnet-compatible.
-- Fund the airdrop wallet with sufficient SOL.
+- **Vercel Build Fails**:
+  - Check build logs for missing variables or dependencies.
+  - Ensure `npm install` runs locally without errors.
+- **Other Issues**:
+  - **Dark Mode**: Check console (F12 > Console) for `Toggling dark mode to: true`.
+  - **Pusher**: Verify credentials and connection logs in Pusher dashboard.
+  - **S3**: Ensure IAM permissions (`s3:PutObject`, `s3:GetObject`, `s3:ListBucket`).
 
 ## License
 MIT License. See [LICENSE](LICENSE) for details.
