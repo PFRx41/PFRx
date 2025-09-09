@@ -1,4 +1,4 @@
-# Solana Airdrop Dashboard
+# Solana Airdrop System for Pump.fun
 
 This project is a Next.js-based web application for managing and visualizing a Solana token airdrop cycle. It scrapes token holders from the Solana mainnet, validates them on devnet, and distributes SOL to qualified holders (with a configurable minimum token balance) and a fee wallet using logarithmic weighting. The dashboard displays airdrop history, total fees claimed, and total SOL distributed, with real-time updates via Pusher, dark mode support, and data persistence to AWS S3.
 
