@@ -87,7 +87,7 @@ export default function Dashboard() {
     <div className="min-h-screen bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-gray-100 transition-colors duration-300">
       <div className="container mx-auto p-6 max-w-7xl">
         <div className="flex flex-col sm:flex-row justify-between items-center mb-6 gap-4">
-          <h1 className="text-3xl font-bold">Solana Airdrop Dashboard</h1>
+          <h1 className="text-3xl font-bold">PFRx Dashboard</h1>
           <div className="flex items-center gap-4">
             <button
               onClick={toggleDarkMode}
