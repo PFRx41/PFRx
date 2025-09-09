@@ -1,4 +1,4 @@
-# Solana Airdrop Dashboard
+# Solana Fair Airdrop System For Pump.Fun
 
 This is a web app built with Next.js to manage and display a Solana token airdrop on the mainnet. It collects token holders from the Solana mainnet, gathers creator fees using the Pump Portal API, and shares SOL with holders who have enough tokens and a fee wallet. The distribution uses a fair method called *adjusted logarithmic weighting* (explained below) to balance rewards, ensuring holders with more tokens (like Bob with 10,000) get more SOL than those with fewer (like Alice with 1,000), without letting the biggest holders take everything. The app features a dashboard that updates live with Pusher, supports dark mode, and saves airdrop history to an AWS S3 bucket in `dashboard_data.xlsx`.
 
