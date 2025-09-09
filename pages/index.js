@@ -1,133 +1,168 @@
-import { useEffect, useState } from "react";
+import { useState, useEffect } from "react";
 import Pusher from "pusher-js";
-import Head from "next/head";
 
-export default function Home() {
-  const [data, setData] = useState({ data: [], totalClaimed: 0, totalAirdropped: 0, lastUpdated: null });
-  const [isDarkMode, setIsDarkMode] = useState(false);
+export default function Dashboard() {
+  const [data, setData] = useState({ rows: [], totalClaimed: 0, totalAirdropped: 0 });
+  const [darkMode, setDarkMode] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    // Initialize Pusher with error handling
-    let pusher;
+    // Load dark mode from localStorage
+    let savedDarkMode = false;
     try {
-      if (!process.env.NEXT_PUBLIC_PUSHER_KEY || !process.env.NEXT_PUBLIC_PUSHER_CLUSTER) {
-        throw new Error("Pusher configuration missing");
-      }
-      pusher = new Pusher(process.env.NEXT_PUBLIC_PUSHER_KEY, {
-        cluster: process.env.NEXT_PUBLIC_PUSHER_CLUSTER,
-        useTLS: true,
-      });
-      const channel = pusher.subscribe("airdrop-channel");
-      channel.bind("dashboard-update", (newData) => {
-        setData(newData);
-        setError(null);
-      });
-      channel.bind("pusher:subscription_error", (err) => {
-        console.error("Pusher subscription error:", err);
-        setError("Failed to subscribe to real-time updates");
-      });
+      savedDarkMode = localStorage.getItem("darkMode") === "true";
     } catch (err) {
-      console.error("Pusher initialization error:", err.message);
-      setError("Real-time updates unavailable");
+      console.error("Error accessing localStorage:", err);
     }
+    setDarkMode(savedDarkMode);
+    document.documentElement.classList.toggle("dark", savedDarkMode);
+    console.log(`Initial dark mode: ${savedDarkMode}`);
 
-    // Load dark mode preference from localStorage
-    const savedTheme = localStorage.getItem("theme");
-    console.log("Loaded theme from localStorage:", savedTheme);
-    if (savedTheme === "dark") {
-      setIsDarkMode(true);
-      document.documentElement.classList.add("dark");
-      console.log("Applied dark mode on mount");
-    }
-
-    // Fetch initial data
-    fetch("/api/dashboard")
-      .then((res) => res.json())
-      .then(setData)
-      .catch((error) => {
-        console.error("Error fetching dashboard data:", error);
-        setError("Failed to load dashboard data");
-      });
-
-    return () => {
-      if (pusher) {
-        pusher.unsubscribe("airdrop-channel");
-        pusher.disconnect();
+    // Fetch initial dashboard data
+    const fetchData = async () => {
+      try {
+        setLoading(true);
+        const res = await fetch("/api/dashboard");
+        if (!res.ok) throw new Error(`HTTP error ${res.status}`);
+        const result = await res.json();
+        setData({
+          rows: Array.isArray(result.rows) ? result.rows : [],
+          totalClaimed: Number(result.totalClaimed) || 0,
+          totalAirdropped: Number(result.totalAirdropped) || 0,
+        });
+        setError(null);
+      } catch (err) {
+        console.error("Error fetching dashboard data:", err);
+        setData({ rows: [], totalClaimed: 0, totalAirdropped: 0 });
+        setError("Failed to load dashboard data. Please try again.");
+      } finally {
+        setLoading(false);
       }
+    };
+    fetchData();
+
+    // Initialize Pusher
+    const pusher = new Pusher(process.env.NEXT_PUBLIC_PUSHER_KEY, {
+      cluster: process.env.NEXT_PUBLIC_PUSHER_CLUSTER,
+      forceTLS: true,
+    });
+    const channel = pusher.subscribe("airdrop-channel");
+    channel.bind("dashboard-update", newData => {
+      setData({
+        rows: Array.isArray(newData.rows) ? newData.rows : [],
+        totalClaimed: Number(newData.totalClaimed) || 0,
+        totalAirdropped: Number(newData.totalAirdropped) || 0,
+      });
+      setError(null);
+    });
+
+    // Cleanup Pusher on unmount
+    return () => {
+      channel.unbind_all();
+      channel.unsubscribe();
+      pusher.disconnect();
     };
   }, []);
 
   const toggleDarkMode = () => {
-    setIsDarkMode((prev) => {
-      const newMode = !prev;
-      console.log("Toggling dark mode to:", newMode ? "dark" : "light");
-      if (newMode) {
-        document.documentElement.classList.add("dark");
-        localStorage.setItem("theme", "dark");
-      } else {
-        document.documentElement.classList.remove("dark");
-        localStorage.setItem("theme", "light");
-      }
-      return newMode;
-    });
+    const newDarkMode = !darkMode;
+    setDarkMode(newDarkMode);
+    try {
+      localStorage.setItem("darkMode", newDarkMode);
+    } catch (err) {
+      console.error("Error saving darkMode to localStorage:", err);
+    }
+    document.documentElement.classList.toggle("dark", newDarkMode);
+    console.log(`Toggled dark mode to: ${newDarkMode}`);
   };
 
   return (
-    <div className="min-h-screen bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-gray-100 flex flex-col items-center justify-center p-4">
-      <Head>
-        <title>Airdrop Dashboard</title>
-      </Head>
-      <div className="w-full max-w-4xl bg-white dark:bg-gray-800 shadow-lg rounded-lg p-6">
+    <div className="min-h-screen bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-gray-100 transition-colors duration-300">
+      <div className="container mx-auto p-6 max-w-7xl">
         <div className="flex justify-between items-center mb-6">
-          <h1 className="text-2xl font-bold">Airdrop Dashboard</h1>
+          <h1 className="text-3xl font-bold">Solana Airdrop Dashboard</h1>
           <button
             onClick={toggleDarkMode}
-            className="px-4 py-2 bg-blue-500 dark:bg-blue-700 text-white rounded hover:bg-blue-600 dark:hover:bg-blue-800 transition"
+            className="px-4 py-2 bg-blue-600 dark:bg-blue-500 text-white rounded-lg hover:bg-blue-700 dark:hover:bg-blue-600 transition flex items-center gap-2"
           >
-            {isDarkMode ? "Light Mode" : "Dark Mode"}
+            <svg
+              className="w-5 h-5"
+              fill="currentColor"
+              viewBox="0 0 20 20"
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              {darkMode ? (
+                <path d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm1.414 8.486l-.707.707a1 1 0 01-1.414-1.414l.707-.707a1 1 0 011.414 1.414zM4 11a1 1 0 100-2H3a1 1 0 000 2h1z" />
+              ) : (
+                <path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z" />
+              )}
+            </svg>
+            {darkMode ? "Switch to Light Mode" : "Switch to Dark Mode"}
           </button>
         </div>
+
+        {loading && (
+          <div className="text-center py-4">
+            <div className="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-600"></div>
+            <span className="ml-2">Loading...</span>
+          </div>
+        )}
+
         {error && (
-          <div className="mb-6 p-4 bg-red-100 dark:bg-red-900 text-red-700 dark:text-red-200 rounded">
+          <div className="mb-6 p-4 bg-red-100 dark:bg-red-900 text-red-700 dark:text-red-200 rounded-lg">
             {error}
           </div>
         )}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-          <div className="p-4 bg-gray-200 dark:bg-gray-700 rounded">
-            <h2 className="text-lg font-semibold">Total Fees Claimed (SOL)</h2>
-            <p className="text-2xl">{data.totalClaimed.toFixed(6)}</p>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+          <div className="p-6 bg-white dark:bg-gray-800 rounded-xl shadow-md">
+            <h2 className="text-xl font-semibold mb-2">Total Fees Claimed (SOL)</h2>
+            <p className="text-3xl font-mono text-blue-600 dark:text-blue-400">
+              {(data.totalClaimed || 0).toFixed(6)}
+            </p>
           </div>
-          <div className="p-4 bg-gray-200 dark:bg-gray-700 rounded">
-            <h2 className="text-lg font-semibold">Total Airdrops Sent (SOL)</h2>
-            <p className="text-2xl">{data.totalAirdropped.toFixed(6)}</p>
+          <div className="p-6 bg-white dark:bg-gray-800 rounded-xl shadow-md">
+            <h2 className="text-xl font-semibold mb-2">Total Airdrops Sent (SOL)</h2>
+            <p className="text-3xl font-mono text-blue-600 dark:text-blue-400">
+              {(data.totalAirdropped || 0).toFixed(6)}
+            </p>
           </div>
         </div>
-        <div className="mb-6">
-          <h2 className="text-lg font-semibold">Last Updated</h2>
-          <p>{data.lastUpdated ? new Date(data.lastUpdated).toLocaleString() : "No data yet"}</p>
-        </div>
-        <div>
-          <h2 className="text-lg font-semibold mb-2">Airdrop History</h2>
-          <div className="overflow-x-auto">
-            <table className="w-full border-collapse">
-              <thead>
-                <tr className="bg-gray-300 dark:bg-gray-600">
-                  <th className="border p-2">Date</th>
-                  <th className="border p-2">Fees Claimed (SOL)</th>
-                  <th className="border p-2">Airdrops Sent (SOL)</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.data.map((row, index) => (
-                  <tr key={index} className="odd:bg-white even:bg-gray-100 dark:odd:bg-gray-800 dark:even:bg-gray-700">
-                    <td className="border p-2">{new Date(row.Date).toLocaleString()}</td>
-                    <td className="border p-2">{row["Fees Claimed (SOL)"].toFixed(6)}</td>
-                    <td className="border p-2">{row["Airdrops Sent (SOL)"].toFixed(6)}</td>
+
+        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-md overflow-hidden">
+          <div className="p-6">
+            <h2 className="text-xl font-semibold mb-4">Airdrop History</h2>
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse">
+                <thead>
+                  <tr className="bg-gray-200 dark:bg-gray-700">
+                    <th className="p-3 text-left">Date</th>
+                    <th className="p-3 text-left">Claimed SOL</th>
+                    <th className="p-3 text-left">Airdropped SOL</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {data.rows.length === 0 && !loading && (
+                    <tr>
+                      <td colSpan="3" className="p-3 text-center text-gray-500 dark:text-gray-400">
+                        No airdrop data available
+                      </td>
+                    </tr>
+                  )}
+                  {data.rows.map((row, index) => (
+                    <tr
+                      key={index}
+                      className="border-b dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700"
+                    >
+                      <td className="p-3">{new Date(row.date).toLocaleString()}</td>
+                      <td className="p-3 font-mono">{(row.claimedSol || 0).toFixed(6)}</td>
+                      <td className="p-3 font-mono">{(row.airdroppedSol || 0).toFixed(6)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       </div>
