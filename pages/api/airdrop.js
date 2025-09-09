@@ -1,6 +1,5 @@
 const { Connection, LAMPORTS_PER_SOL } = require("@solana/web3.js");
-const fs = require("fs").promises;
-const path = require("path");
+const { S3Client, GetObjectCommand, PutObjectCommand } = require("@aws-sdk/client-s3");
 const Pusher = require("pusher");
 const { initializeKeypair, claimFeesForToken, fetchTokenHolders, validateMainnetAddress, sendAirdrop } = require("../../lib/solana");
 const { appendToExcel } = require("../../lib/excel");
@@ -12,6 +11,53 @@ const pusher = new Pusher({
   cluster: process.env.PUSHER_CLUSTER,
   useTLS: true,
 });
+
+const s3Client = new S3Client({
+  region: process.env.AWS_REGION,
+  credentials: {
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+  },
+});
+
+async function streamToString(stream) {
+  const chunks = [];
+  for await (const chunk of stream) {
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks).toString("utf-8");
+}
+
+async function logToFile(message, logFileKey = "airdrop_log.txt") {
+  const timestamp = new Date().toISOString().replace(/T/, " ").replace(/\..+/, "");
+  const logMessage = `[${timestamp}] ${message}\n`;
+  try {
+    let existingContent = "";
+    try {
+      const getCommand = new GetObjectCommand({
+        Bucket: process.env.AWS_S3_BUCKET,
+        Key: logFileKey,
+      });
+      const { Body } = await s3Client.send(getCommand);
+      existingContent = await streamToString(Body);
+    } catch (error) {
+      if (error.name !== "NoSuchKey") {
+        console.error(`Failed to read ${logFileKey} from S3:`, error.message);
+      }
+      // If file doesn't exist, proceed with empty content
+    }
+    const newContent = existingContent + logMessage;
+    await s3Client.send(new PutObjectCommand({
+      Bucket: process.env.AWS_S3_BUCKET,
+      Key: logFileKey,
+      Body: newContent,
+      ContentType: "text/plain",
+    }));
+  } catch (error) {
+    console.error(`Failed to write to ${logFileKey} in S3:`, error.message);
+    throw error;
+  }
+}
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
@@ -27,20 +73,14 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: `Invalid secret key: ${error.message}` });
   }
 
-  async function logToFile(message, logFile = path.join(process.cwd(), "airdrop_log.txt")) {
-    const timestamp = new Date().toISOString().replace(/T/, " ").replace(/\..+/, "");
-    try {
-      await fs.appendFile(logFile, `[${timestamp}] ${message}\n`);
-    } catch (err) {
-      console.error(`Failed to write to log file ${logFile}: ${err.message}`);
-      throw err;
-    }
-  }
-
   try {
     // Clear airdrop log at the start of each cycle
-    const logFilePath = path.join(process.cwd(), "airdrop_log.txt");
-    await fs.writeFile(logFilePath, "");
+    await s3Client.send(new PutObjectCommand({
+      Bucket: process.env.AWS_S3_BUCKET,
+      Key: "airdrop_log.txt",
+      Body: "",
+      ContentType: "text/plain",
+    }));
     await logToFile(`Starting airdrop cycle on mainnet. Project directory: ${process.cwd()}`);
 
     // Validate percentage environment variables
@@ -84,9 +124,13 @@ export default async function handler(req, res) {
         (holder) => `Holder: ${holder.holder_address}, Balance: ${holder.balance}, Token Account: ${holder.token_account}, Qualified: ${qualifiedHolders.some(q => q.holder_address === holder.holder_address) ? "Yes" : "No"}`
       ),
     ].join("\n");
-    const holdersFilePath = path.join(process.cwd(), "token_holders.txt");
-    await fs.writeFile(holdersFilePath, outputContent);
-    await logToFile(`Saved ${holders.length} token holders (${qualifiedHolders.length} qualified) to ${holdersFilePath}`);
+    await s3Client.send(new PutObjectCommand({
+      Bucket: process.env.AWS_S3_BUCKET,
+      Key: "token_holders.txt",
+      Body: outputContent,
+      ContentType: "text/plain",
+    }));
+    await logToFile(`Saved ${holders.length} token holders (${qualifiedHolders.length} qualified) to token_holders.txt in S3`);
     const balance = await connection.getBalance(keypair.publicKey, "confirmed");
     await logToFile(`Mainnet wallet balance: ${balance / LAMPORTS_PER_SOL} SOL`);
     let airdroppedLamports = 0;
@@ -141,7 +185,12 @@ export default async function handler(req, res) {
           (holder, i) => `Holder (${holder.holder_address}): ${(recipients.find(r => r.address === holder.holder_address)?.amount || 0) / LAMPORTS_PER_SOL} SOL (Weight: ${(weights[i] || 0).toFixed(4)})`
         ),
       ].join("\n");
-      await fs.appendFile(holdersFilePath, distributionContent);
+      await s3Client.send(new PutObjectCommand({
+        Bucket: process.env.AWS_S3_BUCKET,
+        Key: "token_holders.txt",
+        Body: outputContent + distributionContent,
+        ContentType: "text/plain",
+      }));
       await logToFile(distributionContent);
       if (recipients.length > 0) {
         airdroppedLamports = await sendAirdrop(connection, keypair, recipients, logToFile);
