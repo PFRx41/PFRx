@@ -51,6 +51,11 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: `Invalid percentages: HOLDERS_PERCENTAGE (${holdersPercentage}) + FEE_WALLET_PERCENTAGE (${feeWalletPercentage}) must equal 100` });
     }
 
+    // Validate minimum balance and token balance
+    const minimumTokenBalance = parseFloat(process.env.MINIMUM_TOKEN_BALANCE) || 100000;
+    const minimumWalletBalanceSol = parseFloat(process.env.MINIMUM_WALLET_BALANCE_SOL) || 0.2;
+    await logToFile(`Using MINIMUM_TOKEN_BALANCE: ${minimumTokenBalance}, MINIMUM_WALLET_BALANCE_SOL: ${minimumWalletBalanceSol}`);
+
     // Bypass claimFeesForToken for devnet testing
     await logToFile(`Bypassing fee claiming for token ${process.env.TOKEN_MINT_ADDRESS} on devnet`);
     const claimedSol = 0; // await claimFeesForToken(process.env.TOKEN_MINT_ADDRESS, connection, keypair, logToFile);
@@ -58,16 +63,15 @@ export default async function handler(req, res) {
     await logToFile("Fetching token holders from mainnet...");
     const holders = await fetchTokenHolders(process.env.TOKEN_MINT_ADDRESS, logToFile);
     const qualifiedHolders = [];
-    const MINIMUM_TOKEN_BALANCE = 100000; // 100,000 tokens
     for (const holder of holders) {
-      if (holder.balance >= MINIMUM_TOKEN_BALANCE && await validateMainnetAddress(connection, holder.holder_address, logToFile)) {
+      if (holder.balance >= minimumTokenBalance && await validateMainnetAddress(connection, holder.holder_address, logToFile)) {
         qualifiedHolders.push(holder);
       }
     }
     const outputContent = [
       `Token Holders for Mint: ${process.env.TOKEN_MINT_ADDRESS} (fetched from mainnet)`,
       `Total Holders: ${holders.length}`,
-      `Qualified Holders (on devnet, min ${MINIMUM_TOKEN_BALANCE} tokens): ${qualifiedHolders.length}`,
+      `Qualified Holders (on devnet, min ${minimumTokenBalance} tokens): ${qualifiedHolders.length}`,
       "-".repeat(50),
       ...holders.map(
         (holder) => `Holder: ${holder.holder_address}, Balance: ${holder.balance}, Token Account: ${holder.token_account}, Qualified: ${qualifiedHolders.some(q => q.holder_address === holder.holder_address) ? "Yes" : "No"}`
@@ -79,7 +83,7 @@ export default async function handler(req, res) {
     const balance = await connection.getBalance(keypair.publicKey, "confirmed");
     await logToFile(`Devnet wallet balance: ${balance / LAMPORTS_PER_SOL} SOL`);
     let airdroppedLamports = 0;
-    const MINIMUM_BALANCE = 0.2 * LAMPORTS_PER_SOL;
+    const MINIMUM_BALANCE = minimumWalletBalanceSol * LAMPORTS_PER_SOL;
     if (balance > MINIMUM_BALANCE) {
       const distributableLamports = Math.floor(balance - MINIMUM_BALANCE);
       await logToFile(`Distributable amount: ${distributableLamports / LAMPORTS_PER_SOL} SOL`);
@@ -142,7 +146,7 @@ export default async function handler(req, res) {
         await logToFile("No valid recipients, skipping airdrop on devnet");
       }
     } else {
-      await logToFile("Devnet wallet balance <= 0.2 SOL, skipping airdrop");
+      await logToFile(`Devnet wallet balance <= ${minimumWalletBalanceSol} SOL, skipping airdrop`);
     }
     const airdroppedSol = airdroppedLamports / LAMPORTS_PER_SOL;
     await appendToExcel(new Date(), claimedSol, airdroppedSol);
