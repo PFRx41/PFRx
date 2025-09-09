@@ -1,27 +1,34 @@
-Node.js dependencies
+# Node.js dependencies
+node_modules/
+npm-debug.log
+yarn-error.log
 
-node_modules/ npm-debug.log yarn-error.log
+# Next.js build output
+.next/
+out/
+build/
 
-Next.js build output
+# Environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
 
-.next/ out/ build/
+# Temporary files
+*.txt
+*.xlsx
 
-Environment variables
-
-.env .env.local .env.development.local .env.test.local .env.production.local
-
-Temporary files
-
-*.txt *.xlsx
-
-Vercel
-
+# Vercel
 .vercel
 
-Editor and OS files
+# Editor and OS files
+.DS_Store
+Thumbs.db
+*.log
+.vscode/
+.idea/
 
-.DS_Store Thumbs.db *.log .vscode/ .idea/
-
-Build artifacts
-
-dist/ coverage/
+# Build artifacts
+dist/
+coverage/
